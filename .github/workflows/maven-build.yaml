@@ -46,8 +46,6 @@ on:
         required: true
       deploy_github_token:
         required: true
-      organization_key:
-        required: true
 
 env:
   GITHUB_ACTOR: ${{github.actor}}
