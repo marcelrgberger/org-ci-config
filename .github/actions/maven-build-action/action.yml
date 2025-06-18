@@ -142,10 +142,12 @@ runs:
 
     # Wait for SonarCloud Quality Gate status
     - name: Wait for Quality Gate
+      shell: bash
       run: |
-        echo "Waiting for SonarCloud Quality Gate result for project {{ github.event.repository.name }}..."
+        REPO_NAME=$(basename "$GITHUB_REPOSITORY")
+        echo "Waiting for SonarCloud Quality Gate result for project $REPO_NAME..."
         for i in {1..10}; do
-          STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=berger-and-rosenstock_{{ github.event.repository.name }}" | jq -r '.projectStatus.status')
+          STATUS=$(curl -s -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=berger-and-rosenstock_${REPO_NAME}" | jq -r '.projectStatus.status')
           echo "Status response: $STATUS"
           if [ "$STATUS" == "OK" ]; then
             echo "Quality Gate passed: $STATUS"
@@ -157,15 +159,14 @@ runs:
             echo "This is the first run or status is null. Run analysis again..."
             sleep 60
             mvn sonar:sonar -Pdeploy-github -Dsonar.token=$SONAR_TOKEN --settings .m2/settings.xml
-          exit 0
+            exit 0
           else
             echo "Quality Gate not ready yet (attempt $i)..."
             sleep 10
           fi
-          done
-          echo "Timeout waiting for Quality Gate status"
-          exit 1
-      shell: bash
+        done
+        echo "Timeout waiting for Quality Gate status"
+        exit 1
 
     # Pushes the SNAPSHOT artifact to the internal-maven-repo package repo
     - name: Build and Deploy Snapshots to GitHub Packages - internal-maven-repo
