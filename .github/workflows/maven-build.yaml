@@ -44,8 +44,6 @@ on:
     secrets:
       sonar_token:
         required: true
-      teams_webhook_url:
-        required: true
       deploy_github_token:
         required: true
 
