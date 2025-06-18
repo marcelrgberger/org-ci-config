@@ -1,0 +1,110 @@
+name: Parent Maven Build and Deploy
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        description: 'Name of the repo to act on'
+        required: true
+        type: string
+      branch:
+        description: 'Branch to run the workflow on'
+        required: true
+        type: string
+      maven_goal:
+        description: 'Maven goals to run, e.g., clean package'
+        required: false
+        default: 'clean package'
+        type: string
+      maven_version:
+        description: 'Release version increase e.g. MAJOR'
+        required: false
+        default: ''
+        type: string
+      java_version:
+        description: 'Build with Java version e.g. 21'
+        required: false
+        default: 21
+        type: number
+      jave_distribution:
+        description: 'Build with Java Distribution e.g. adopt. Adopt is default.'
+        required: false
+        default: adopt
+        type: string
+      runner:
+        description: 'Define a special runner for this build. Default is ubuntu latest'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+    outputs:
+      cache-key:
+        description: 'Cache key for next job'
+        value: ${{ jobs.maven-build.outputs.step-cache-key }}
+
+    secrets:
+      sonar_token:
+        required: true
+      teams_webhook_url:
+        required: true
+      deploy_github_token:
+        required: true
+
+env:
+  GITHUB_ACTOR: ${{github.actor}}
+  GITHUB_TOKEN: ${{github.token}}
+  REPOSITORY: ${{ inputs.repository }}
+  SONAR_TOKEN: ${{ secrets.sonar_token }}
+  TEAMS_WEBHOOK_URL: ${{ secrets.teams_webhook_url }}
+  DEPLOY_GITHUB_TOKEN: ${{ secrets.deploy_github_token }}
+
+jobs:
+  maven-build:
+    runs-on: ${{ inputs.runner}}
+    outputs:
+      step-cache-key: ${{ steps.generate-cache-key.outputs.CACHE_KEY}}
+    steps:
+      # Release Build is only allowed for master ir main branches.
+      - name: Validate Branch for Release
+        run: |
+          if [[ -n "${{ inputs.maven_version }}" && "${{ inputs.branch }}" != "main" && "${{ inputs.branch }}" != "master" ]]; then
+            echo "Error: Releases are only allowed on the 'main' or 'master' branch."
+            exit 1
+          fi
+          echo "Branch and Maven version validation passed."
+      # Checkout repository of the current branch
+      - name: Check Out Repository ${{ inputs.repository }} And Branch ${{ inputs.branch }}
+        uses: actions/checkout@v4.2.2
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.branch }}
+      # Set up the newest Java Version and activate Maven Cache
+      - name: Set up Java
+        uses: actions/setup-java@v4.5.0
+        with:
+          java-version: '${{ inputs.java_version }}'
+          distribution: ${{ inputs.jave_distribution }}
+          cache: 'maven'
+          check-latest: true
+      # Run the maven build with the custom maven-build action
+      - name: Run Maven Build
+        id: maven-build
+        uses: marcelrgberger/org-ci-config/.github/actions/maven-build-action@main
+        with:
+          maven-goals: ${{ inputs.maven_goal }}
+          maven-version: ${{ inputs.maven_version }}
+
+      # Generate Cache Hash Key
+      - name: Generate Cache Key
+        id: generate-cache-key
+        run: |
+          CACHE_KEY="${{ runner.os }}-target-${{ hashFiles('**/pom.xml') }}"
+          echo "CACHE_KEY=${CACHE_KEY}" >> $GITHUB_ENV
+          echo "CACHE_KEY=${CACHE_KEY}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      # Cache target folder
+      - name: Cache Target Folder
+        uses: actions/cache@v3
+        with:
+          path: .
+          key: ${{ env.CACHE_KEY }}

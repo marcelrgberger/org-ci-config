@@ -1,0 +1,91 @@
+name: Container Build and Push
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: false creates a SNAPSHOT-Image and true a Release Image und a Latest Image
+        required: false
+        type: boolean
+        default: false
+      cache-key:
+        description: Required to build generated artifact
+        type: string
+        required: true
+    secrets:
+      registry_username:
+        required: true
+      registry_token:
+        required: true
+env:
+  REGISTRY_USERNAME: ${{ secrets.registry_username }}
+  REGISTRY_TOKEN: ${{ secrets.registry_token }}
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      # Restore Target Cache
+      - name: Restore Target Cache
+        uses: actions/cache@v3
+        with:
+          path: .
+          key: ${{ inputs.cache-key }}
+      # Check if Dockerfile is configured
+      - name: Check for Dockerfile in Root
+        shell: bash
+        id: check_dockerfile
+        run: |
+          if [ -f "Dockerfile" ]; then
+            echo "exists=true" >> $GITHUB_ENV
+          else
+            echo "exists=false" >> $GITHUB_ENV
+          fi
+      # Extract the artifactId -
+      - name: Extract artifactId from pom.xml
+        if: env.exists == 'true'
+        id: extract-artifact-id
+        run: |
+          ARTIFACT_ID=$(grep -oE "<artifactId>[^<]+</artifactId>" pom.xml | sed -n 2p | sed 's/<artifactId>\(.*\)<\/artifactId>/\1/')
+          echo "ARTIFACT_ID=$ARTIFACT_ID"  >> $GITHUB_ENV  
+          echo "$ARTIFACT_ID"
+        shell: bash
+
+      # Fetch the current artifact version from the pom
+      - name: Fetch current version for Release Tag
+        if: env.exists == 'true'
+        shell: bash
+        run: |
+          VERSION=$(grep -oE "<version>[^<]+</version>" pom.xml | sed -n 2p | sed 's/<version>\(.*\)<\/version>/\1/')
+          echo "VERSION=$VERSION"
+          echo "NEW_VERSION=$VERSION" >> $GITHUB_ENV  
+          
+      # Check if LABEL exists in Dockerfile, add it if not
+      - name: Check and add LABEL to Dockerfile if missing
+        if: env.exists == 'true'
+        shell: bash
+        run: |
+          REPO_URL="https://github.com/${{ github.repository }}"
+          if ! grep -q "^LABEL org.opencontainers.image.source=" Dockerfile; then
+            echo "Adding LABEL to Dockerfile"
+            echo -e "\nLABEL org.opencontainers.image.source=$REPO_URL" >> Dockerfile
+          else
+            echo "LABEL already exists in Dockerfile"
+          fi
+      # Run Docker build and push to docker registry
+      - name: Run Docker Build Action with created tag
+        if: env.exists == 'true'
+        uses: marcelrgberger/org-ci-config/.github/actions/docker-build-action@main
+        with:
+          image_name: ${{ env.ARTIFACT_ID }}
+          tag_version: ${{ env.NEW_VERSION }}
+          registry: ghcr.io/marcelrgberger/internal-docker-repo
+
+      # Run Docker build and push latest to docker registry
+      - name: Run Docker Build Action with latest tag
+        if: inputs.release == true && env.exists == 'true'
+        uses: marcelrgberger/org-ci-config/.github/actions/docker-build-action@main
+        with:
+          image_name: ${{ env.ARTIFACT_ID }}
+          tag_version: 'latest'
+          registry: ghcr.io/marcelrgberger/internal-docker-repo

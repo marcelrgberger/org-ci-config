@@ -1,0 +1,213 @@
+name: "Maven Build and Deploy with Conditional Release"
+description: "Builds a Maven project and optionally commits and tags a release if conditions are met"
+author: "Marcel Berger"
+
+inputs:
+  maven-goals:
+    description: "Maven goals to run, e.g., 'clean package'"
+    required: true
+    default: "clean package"
+  maven-version:
+    description: "Release version bump (MAJOR, MINOR, PATCH). Leave empty for no release."
+    required: false
+    default: ''
+  branch:
+    description: "Branch to validate for release"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Generate custom settings.xml
+    - name: Generate settings.xml for Maven
+      uses: whelk-io/maven-settings-xml-action@v22
+      with:
+        servers: >
+          [
+            {
+              "id": "internal-maven-repo",
+              "username": "$GITHUB_ACTOR_PLACEHOLDER",
+              "password": "$GITHUB_TOKEN_PLACEHOLDER"
+            }
+          ]
+        repositories: >
+          [
+            {
+              "id": "internal-maven-repo",
+              "url": "https://maven.pkg.github.com/4brainsolutions/internal-maven-repo"
+            }
+          ]
+        profiles: >
+          [
+           {
+              "id": "deploy-github",
+              "properties": {
+                "altSnapshotDeploymentRepository":"internal-maven-repo::https://maven.pkg.github.com/4brainsolutions/internal-maven-repo",
+                "altReleaseDeploymentRepository":"internal-maven-repo::https://maven.pkg.github.com/4brainsolutions/internal-maven-repo"
+                }
+            }
+          ]
+        output_file: ".m2/settings.xml"
+    # Replace the placeholder with the real secrets
+    - name: Add secrets to settings.xml
+      shell: bash
+      run: |
+        sed -i "s|\$GITHUB_ACTOR_PLACEHOLDER|${GITHUB_ACTOR}|g" .m2/settings.xml
+        sed -i "s|\$GITHUB_TOKEN_PLACEHOLDER|${DEPLOY_GITHUB_TOKEN}|g" .m2/settings.xml
+    # Print out the current version of the settings.xml
+    - name: Check setting.xml
+      shell: bash
+      run: cat .m2/settings.xml
+    # Fetch the current artifact version from the pom
+    - name: Fetch current version
+      id: get-version
+      shell: bash
+      run: |
+        VERSION=$(grep -oE "<version>[^<]+</version>" pom.xml | sed -n 2p | sed 's/<version>\(.*\)<\/version>/\1/')
+        echo "VERSION=$VERSION"
+        echo "current_version=$VERSION" >> $GITHUB_ENV
+
+      # Set SNAPSHOT and Timestamp for non release builds.
+    - name: Ensure SNAPSHOT Suffix with Timestamp for Non-Release Versions
+      id: ensure-snapshot
+      if: inputs.maven-version == ''
+      shell: bash
+      run: |
+        VERSION=${{ env.current_version }}
+        TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        
+        # Entferne vorhandenen Timestamp und '-SNAPSHOT', falls vorhanden
+        CLEANED_VERSION=$(echo "$VERSION" | sed -E 's/-[0-9]{14}-SNAPSHOT$//; s/-SNAPSHOT$//')
+        
+        if [[ "$VERSION" != *"-SNAPSHOT" ]]; then
+          echo "Version does not have '-SNAPSHOT' suffix. Adding timestamp and '-SNAPSHOT' now."
+          NEW_VERSION="${CLEANED_VERSION}-${TIMESTAMP}-SNAPSHOT"
+          mvn versions:set -DnewVersion="$NEW_VERSION" --settings .m2/settings.xml
+          echo "Updated version to '$NEW_VERSION'"
+          # Schreibe den aktualisierten Wert in $GITHUB_OUTPUT
+          echo "current_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        else
+          echo "Version already has '-SNAPSHOT' suffix. Updating timestamp before '-SNAPSHOT'."
+          NEW_VERSION="${CLEANED_VERSION}-${TIMESTAMP}-SNAPSHOT"
+          mvn versions:set -DnewVersion="$NEW_VERSION" --settings .m2/settings.xml
+          echo "Updated version to '$NEW_VERSION'"
+          echo "current_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        fi
+         echo "new_version=$NEW_VERSION" >> $GITHUB_ENV
+
+    # Determine new Artifact version
+    - name: Determine new version if Release
+      if: inputs.maven-version != ''
+      shell: bash
+      run: |
+        VERSION=${{ env.current_version }}
+        INPUT_VERSION="${{ inputs.maven-version }}"
+
+        # Entferne '-SNAPSHOT' und vorhandenen Timestamp aus der Version
+        CLEANED_VERSION=$(echo "$VERSION" | sed -E 's/-[0-9]{14}-SNAPSHOT$//; s/-SNAPSHOT$//')
+
+        MAJOR=$(echo "$CLEANED_VERSION" | cut -d. -f1)
+        MINOR=$(echo "$CLEANED_VERSION" | cut -d. -f2)
+        PATCH=$(echo "$CLEANED_VERSION" | cut -d. -f3)
+
+        if [[ "$INPUT_VERSION" == "MAJOR" ]]; then
+          MAJOR=$((MAJOR + 1))
+          MINOR=0
+          PATCH=0
+        elif [[ "$INPUT_VERSION" == "MINOR" ]]; then
+          MINOR=$((MINOR + 1))
+          PATCH=0
+        elif [[ "$INPUT_VERSION" == "PATCH" ]]; then
+          PATCH=$((PATCH + 1))
+        fi
+
+        NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "new_version=$NEW_VERSION" >> $GITHUB_ENV
+
+    # Set new Artifact Version
+    - name: Set new Maven version
+      shell: bash
+      run: |
+        mvn versions:set -DnewVersion="${{ env.new_version }}" --settings .m2/settings.xml
+
+    # Run Maven tests
+    - name: Run Tests
+      run: mvn clean test --settings .m2/settings.xml
+      shell: bash
+
+    # Run SonarCloud Analysis using the configuration from pom.xml
+    - name: Run SonarCloud Analysis
+      run: mvn sonar:sonar -Pdeploy-github -Dsonar.token=$SONAR_TOKEN --settings .m2/settings.xml
+      shell: bash
+
+    # Wait for SonarCloud Quality Gate status
+    - name: Wait for Quality Gate
+      run: |
+        echo "Waiting for SonarCloud Quality Gate result..."
+        for i in {1..10}; do
+          STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=4brainsolutions_${{ github.event.repository.name }}" | jq -r '.projectStatus.status')
+          echo "Status response: $STATUS"
+          if [ "$STATUS" == "OK" ]; then
+            echo "Quality Gate passed: $STATUS"
+            exit 0
+          elif [ "$STATUS" == "ERROR" ]; then
+            echo "Quality Gate failed: $STATUS"
+            exit 1
+          elif [ "$STATUS" == "NONE" ] || [ "$STATUS" == "null" ]; then
+            echo "This is the first run or status is null. Run analysis again..."
+            sleep 60
+            mvn sonar:sonar -Pdeploy-github -Dsonar.token=$SONAR_TOKEN --settings .m2/settings.xml
+          exit 0
+          else
+            echo "Quality Gate not ready yet (attempt $i)..."
+            sleep 10
+          fi
+          done
+          echo "Timeout waiting for Quality Gate status"
+          exit 1
+      shell: bash
+
+    # Pushes the SNAPSHOT artifact to the internal-maven-repo package repo
+    - name: Build and Deploy Snapshots to GitHub Packages - internal-maven-repo
+      if: contains(steps.ensure-snapshot.outputs.current_version, '-SNAPSHOT')
+      shell: bash
+      run: |
+        mvn clean deploy -Pdev -DskipTests -Pdeploy-github --settings .m2/settings.xml
+
+    # Pushes the Release artifact to the internal-maven-repo package repo
+    - name: Build and Deploy Releases to GitHub Packages - internal-maven-repo
+      if: inputs.maven-version != ''
+      shell: bash
+      run: |
+        mvn clean deploy -DskipTests -Pdeploy-github --settings .m2/settings.xml
+
+      # Check if pom.xml has changes
+    - name: Check if pom.xml is modified
+      shell: bash
+      run: |
+        if git diff --name-only | grep -q "pom.xml"; then
+          echo "pom.xml has changes."
+          echo "modified=true" >> $GITHUB_ENV
+        else
+          echo "No changes in pom.xml."
+          echo "modified=false" >> $GITHUB_ENV
+        fi
+
+    # Pushes the new artifact version to the git repo
+    - name: Commit and Push the updated version
+      if: env.modified == 'true'
+      shell: bash
+      run: |
+        git config user.name "${{ github.actor }}"
+        git config user.email "${{ github.actor }}@users.noreply.github.com"
+        git add pom.xml
+        git commit -m "Release: Updated version to ${{ env.new_version }}"
+        git push origin ${{ inputs.branch }}
+
+    # If it's a relase it creates a release tag
+    - name: Create GitHub Release Tag
+      if: inputs.maven-version != ''
+      shell: bash
+      run: |
+        git tag -a "v${{ env.new_version }}" -m "Release v${{ env.new_version }}"
+        git push origin "v${{ env.new_version }}"

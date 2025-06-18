@@ -1,0 +1,68 @@
+name: Parent npm Build and Deploy
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        description: 'Name of the repo to act on'
+        required: true
+        type: string
+      branch:
+        description: 'Branch to run the workflow on'
+        required: true
+        type: string
+      path:
+        description: 'Path to typescipt code'
+        required: true
+        type: string
+    secrets:
+      sonar_token:
+        required: true
+      deploy_github_token:
+        required: true
+env:
+  GITHUB_ACTOR: ${{github.actor}}
+  GITHUB_TOKEN: ${{github.token}}
+  REPOSITORY: ${{ inputs.repository }}
+  SONAR_TOKEN: ${{ secrets.sonar_token }}
+  DEPLOY_GITHUB_TOKEN: ${{ secrets.deploy_github_token }}
+
+jobs:
+  npm-build:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout repository of the current branch
+      - name: Check Out Repository ${{ inputs.repository }} And Branch ${{ inputs.branch }}
+        uses: actions/checkout@v4.2.2
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.branch }}-
+      # Setup Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+          registry-url: 'https://npm.pkg.github.com/marcelrgberger/internal-npm-repo'
+          scope: '@4brainsolutions'
+      # Configure NPM Authentication
+      - name: Configure NPM Authentication
+        run: |
+          echo "@4brainsolutions:registry=https://npm.pkg.github.com/marcelrgberger/internal-npm-repo/" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Install npm dependencies
+      - name: Install Dependencies
+        working-directory: ${{inputs.path}}
+        run: npm install
+      # Build npm Package
+      - name: Build NPM Package
+        working-directory: ${{inputs.path}}
+        run: npm run build
+      # Publish to Github Package
+      - name: Publish to GitHub Packages
+        working-directory: ${{inputs.path}}
+        run: npm publish --registry=https://npm.pkg.github.com/marcelrgberger/internal-npm-repo/
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
