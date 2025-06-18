@@ -92,6 +92,7 @@ jobs:
         with:
           maven-goals: ${{ inputs.maven_goal }}
           maven-version: ${{ inputs.maven_version }}
+          branch: ${{ inputs.branch }}
 
       # Generate Cache Hash Key
       - name: Generate Cache Key
