@@ -55,7 +55,6 @@ env:
   REPOSITORY: ${{ inputs.repository }}
   SONAR_TOKEN: ${{ secrets.sonar_token }}
   DEPLOY_GITHUB_TOKEN: ${{ secrets.deploy_github_token }}
-  ORGANIZATION_KEY: ${{secrets.organization_key}}
 
 jobs:
   maven-build:

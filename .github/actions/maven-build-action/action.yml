@@ -145,7 +145,7 @@ runs:
       run: |
         echo "Waiting for SonarCloud Quality Gate result..."
         for i in {1..10}; do
-          STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$ORGANIZATION_KEY{{ github.event.repository.name }}" | jq -r '.projectStatus.status')
+          STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=berger-and-rosenstock_{{ github.event.repository.name }}" | jq -r '.projectStatus.status')
           echo "Status response: $STATUS"
           if [ "$STATUS" == "OK" ]; then
             echo "Quality Gate passed: $STATUS"
