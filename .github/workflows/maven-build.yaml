@@ -52,7 +52,6 @@ env:
   GITHUB_TOKEN: ${{github.token}}
   REPOSITORY: ${{ inputs.repository }}
   SONAR_TOKEN: ${{ secrets.sonar_token }}
-  TEAMS_WEBHOOK_URL: ${{ secrets.teams_webhook_url }}
   DEPLOY_GITHUB_TOKEN: ${{ secrets.deploy_github_token }}
 
 jobs:
