@@ -129,7 +129,7 @@ jobs:
       - name: Run SonarCloud Analysis
         env:
           SONAR_TOKEN: ${{ secrets.sonar_token }}
-          PROJECT_KEY: 4brainsolutions_${{ github.event.repository.name }}
+          PROJECT_KEY: berger-and-rosenstock_${{ github.event.repository.name }}
           BRANCH_NAME: ${{ github.ref_name }}
           ORGANIZATION_KEY: ${{secrets.ORGANIZATION_KEY}}
         run: |
@@ -147,13 +147,13 @@ jobs:
       - name: Wait for Quality Gate
         env:
           SONAR_TOKEN: ${{ secrets.sonar_token }}
-          PROJECT_KEY: 4brainsolutions_${{ github.event.repository.name }}
+          PROJECT_KEY: berger-and-rosenstock_${{ github.event.repository.name }}
           BRANCH_NAME: ${{ github.ref_name }}
           ORGANIZATION_KEY: ${{secrets.ORGANIZATION_KEY}}
         run: |
           echo "Waiting for SonarCloud Quality Gate result..."
           for i in {1..10}; do
-            STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=4brainsolutions_${{ github.event.repository.name }}" | jq -r '.projectStatus.status')
+            STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonarcloud.io/api/qualitygates/project_status?projectKey=berger-and-rosenstock_${{ github.event.repository.name }}" | jq -r '.projectStatus.status')
             echo "Status response: $STATUS"
             if [ "$STATUS" == "OK" ]; then
               echo "Quality Gate passed: $STATUS"
@@ -168,7 +168,7 @@ jobs:
                echo "Running SonarCloud Analysis with Project Key: $PROJECT_KEY"
                sonar-scanner \
                  -Dsonar.projectKey=$PROJECT_KEY \
-                 -Dsonar.organization=4brainsolutions \
+                 -Dsonar.organization=berger-and-rosenstock \
                  -Dsonar.token=$SONAR_TOKEN \
                  -Dsonar.sources=lib,test \
                  -Dsonar.inclusions=lib/**,test/**,pubspec.yaml,pubspec.lock,analysis_options.yaml \
@@ -626,7 +626,7 @@ jobs:
       - name: Upload Release to PlayStore
         #if: ${{ inputs.release_version != 'test' && inputs.release_version != 'dev'}}
         if: false
-        uses: 4brainsolutions/org-ci-config/.github/actions/upload-playstore-action@main
+        uses: marcelrgberger/org-ci-config/.github/actions/upload-playstore-action@main
         with:
           service_account_json: ${{ secrets.ANDROID_SERVICE_ACCOUNT_JSON }}
           package_name: ${{ inputs.android_bundle_id }}
@@ -647,7 +647,7 @@ jobs:
       - name: Upload Test-Build to PlayStore
         #if: ${{ inputs.release_version == 'test'}}
         if: false
-        uses: 4brainsolutions/org-ci-config/.github/actions/upload-playstore-action@main
+        uses: marcelrgberger/org-ci-config/.github/actions/upload-playstore-action@main
         with:
           service_account_json: ${{ secrets.ANDROID_SERVICE_ACCOUNT_JSON }}
           package_name: ${{ inputs.android_bundle_id }}
